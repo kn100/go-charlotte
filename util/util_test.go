@@ -1,19 +1,17 @@
 package util
 
 import (
-	"fmt"
 	"net/url"
 	"testing"
 )
 
 func TestFilterLinksByHostname(t *testing.T) {
-	baseURL, _ := url.Parse("https://kn100.me/")
 	urlSubPage, _ := url.Parse("https://kn100.me/about")
 	urlSubDomain, _ := url.Parse("https://hire.kn100.me/")
 	otherDomain, _ := url.Parse("https://monzo.com/")
 	var urls []*url.URL
 	urls = append(urls, urlSubPage, urlSubDomain, otherDomain)
-	filteredURLS := FilterLinksByHostname(urls, baseURL)
+	filteredURLS := FilterLinksByHostname(urls, "https://kn100.me/")
 	for i := 0; i < len(filteredURLS); i++ {
 		if filteredURLS[i] == otherDomain {
 			t.Errorf("%s was not filtered from resultant addresses", otherDomain.String())
@@ -33,27 +31,22 @@ func TestCleanURLS(t *testing.T) {
 }
 
 func TestLinkPartOfSite(t *testing.T) {
-	baseURL, _ := url.Parse("https://kn100.me/")
-	partOfSiteURL, _ := url.Parse("https://kn100.me/about")
-	otherDomain, _ := url.Parse("https://monzo.com/test")
-	if LinkPartOfSite(partOfSiteURL, baseURL) != true {
-		t.Errorf("URL %s is part of %s", partOfSiteURL.String(), baseURL.String())
+	url, _ := url.Parse("https://kn100.me/about")
+	if LinkPartOfSite(url, "kn100.me") != true {
+		t.Errorf("URL %s is part of %s", url.String(), "kn100.me")
 	}
-	if LinkPartOfSite(partOfSiteURL, otherDomain) != false {
-		t.Errorf("URL %s is NOT part of %s", otherDomain.String(), baseURL.String())
+	if LinkPartOfSite(url, "monzo.com") != false {
+		t.Errorf("URL %s is NOT part of %s", url.String(), "monzo.com")
 	}
 }
 
 func TestInvalidDataLinkPartOfSite(t *testing.T) {
 	goodURL, _ := url.Parse("http://kn100.me/")
-	badURL, err := url.Parse("https://kn100.man.")
-	if err != nil {
-		fmt.Println(err)
-	}
-	if LinkPartOfSite(badURL, goodURL) != false {
+	badURL, _ := url.Parse("https://kn100.man.")
+	if LinkPartOfSite(badURL, "kn100.me") != false {
 		t.Errorf("Invalid domain %s should NOT be considered part of the site.", badURL.String())
 	}
-	if LinkPartOfSite(goodURL, badURL) != false {
+	if LinkPartOfSite(goodURL, "kn100.man") != false {
 		t.Errorf("Invalid domain %s should NOT be considered part of the site.", badURL.String())
 	}
 }

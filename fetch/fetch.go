@@ -1,3 +1,6 @@
+// Package fetch can asynchronously request links and parse the links in the
+// pages out. It's intended use is to spider a given set of pages
+// asynchronously.
 package fetch
 
 import (
@@ -21,34 +24,49 @@ type JobResult struct {
 /*
 Links returns a list of JobResults - each one containing the results for one queue entry
 */
-func Links(queue []*url.URL) []JobResult {
+func Links(client *http.Client, queue []*url.URL) []JobResult {
+
 	var jobResults []JobResult
+	// This channel is used for communication between producers and the consumer.
 	done := make(chan JobResult)
-	var wg sync.WaitGroup
+	var producerWaitGroup sync.WaitGroup
+	var consumerWaitGroup sync.WaitGroup
 	for len(queue) > 0 {
-		wg.Add(1)
+		producerWaitGroup.Add(1)
+
+		// This is effectively a dequeue operation
 		toProcess := queue[0]
 		queue = queue[1:]
-		go getLinksForSingleURL(toProcess, done)
+
+		// give the work to a goroutine to do it!
+		go getLinksForSingleURL(client, toProcess, done, &producerWaitGroup)
 	}
-	go linkConsumer(done, &jobResults, &wg)
-	wg.Wait()
+	consumerWaitGroup.Add(1)
+	go linkConsumer(done, &jobResults, &consumerWaitGroup)
+	// We cannot proceed until every producer has finished.
+	producerWaitGroup.Wait()
+	// Nothing else will be written to this channel, so close it. This will
+	// trigger the consumer to quit after it's finished what it is doing.
+	close(done)
+	consumerWaitGroup.Wait()
 	return jobResults
 }
 
 /*
 getLinksForSingleURL is the 'job' that Links runs. It returns the JobResult via the channel
 */
-func getLinksForSingleURL(url *url.URL, done chan JobResult) {
+func getLinksForSingleURL(client *http.Client, url *url.URL, done chan JobResult, wg *sync.WaitGroup) {
 	links := JobResult{FromURL: url, LinksTo: nil}
 
-	resp, err := http.Get(url.String())
+	resp, err := client.Get(url.String())
 	if err != nil {
-		log.Printf("Loading failed for link %s. Pretending it has no links.\n", url.String())
+		// We could implement some retry logic here. I didn't though!
+		log.Printf("Loading failed for link %s. Pretending it has no links. Err: %s\n", url.String(), err)
 		done <- links
 		return
 	}
 	defer resp.Body.Close()
+
 	z := html.NewTokenizer(resp.Body)
 	for {
 		tt := z.Next()
@@ -57,11 +75,13 @@ func getLinksForSingleURL(url *url.URL, done chan JobResult) {
 		case tt == html.ErrorToken:
 			err := z.Err()
 			if err == io.EOF {
-				//end of the file, break out of the loop
+				// End of the file, break out of the loop
 				done <- links
+				wg.Done()
 				return
 			}
-			// There's been an error. We should probably deal with this more gracefully, but for now log and return what we did get.
+			// There's been an error. We should probably deal with this more
+			// gracefully, but for now log and return the links we did get.
 			log.Println("There was an error parsing the html.", err)
 			done <- links
 			return
@@ -69,16 +89,17 @@ func getLinksForSingleURL(url *url.URL, done chan JobResult) {
 		case tt == html.StartTagToken:
 			t := z.Token()
 
-			isAnchor := t.Data == "a"
-			if isAnchor {
+			if t.Data == "a" {
+				// We've found <a>!
 				link := getHref(t)
 				if link != "" {
 					foundLink, err := url.Parse(link)
 					if err != nil {
-						log.Printf("Wasn't able to parse %s. Error %s\n", link, err)
-						return
+						// Looks like garbage in the href tag. Leave it out.
+						log.Printf("Wasn't able to parse %s. Ignoring. Error %s\n", link, err)
+					} else {
+						links.LinksTo = append(links.LinksTo, foundLink)
 					}
-					links.LinksTo = append(links.LinksTo, foundLink)
 				}
 			}
 		}
@@ -87,7 +108,7 @@ func getLinksForSingleURL(url *url.URL, done chan JobResult) {
 
 /*
 getHref will when given a html.Token, find the href key and returns it.
-boo
+If it cannot find a href, it returns the empty string.
 */
 func getHref(t html.Token) string {
 	// Iterate over all of the Token's attributes until we find an "href"
@@ -99,9 +120,15 @@ func getHref(t html.Token) string {
 	return ""
 }
 
+/*
+linkConsumer ranges on a channel, appending the data it gets from it onto job
+results array you passed it. Since this is one single goroutine, this is
+threadsafe (but kinda cheaty)
+*/
 func linkConsumer(j chan JobResult, results *[]JobResult, wg *sync.WaitGroup) {
 	for s := range j {
 		*results = append(*results, s)
-		wg.Done()
+
 	}
+	wg.Done()
 }

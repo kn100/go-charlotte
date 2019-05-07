@@ -1,3 +1,5 @@
+// Package util provides helper methods related to filtering and normalising
+// URLS. It is used by both package fetch and package sitemap.
 package util
 
 import (
@@ -14,10 +16,10 @@ the returned list would be kn100.me and hello.kn100.me/hi. All links passed in
 are expected to be absolute. You can use MakeLinkAbsolute(linkURL, baseURL) to
 ensure this.
 */
-func FilterLinksByHostname(links []*url.URL, root *url.URL) []*url.URL {
+func FilterLinksByHostname(links []*url.URL, rootTLDPlusOne string) []*url.URL {
 	var acceptableLinks []*url.URL
 	for i := 0; i < len(links); i++ {
-		if LinkPartOfSite(links[i], root) {
+		if LinkPartOfSite(links[i], rootTLDPlusOne) {
 			acceptableLinks = append(acceptableLinks, links[i])
 		}
 
@@ -26,7 +28,7 @@ func FilterLinksByHostname(links []*url.URL, root *url.URL) []*url.URL {
 }
 
 /*
-CleanURLs will process a list of pointers to url.URLs, removing anchors and
+CleanURLS will process a list of pointers to url.URLs, removing anchors and
 query parameters.
 */
 func CleanURLS(links []*url.URL) {
@@ -41,24 +43,18 @@ returns true if so, false if not. It makes use of the publicsuffix library for
 this, which is a database of tlds. It's possible this could be out of date if
 you're having trouble here.
 */
-func LinkPartOfSite(link, root *url.URL) bool {
+func LinkPartOfSite(link *url.URL, rootTLDPlusOne string) bool {
 	// This allows us to crawl subdomains too!
 	linkTLDPlusOne, err := publicsuffix.EffectiveTLDPlusOne(link.Hostname())
 	if err != nil {
-		fmt.Sprintln("I couldn't extract the TLD Plus One of #s. This won't be included in the sitemap.", link.Hostname())
-		return false
-	}
-	rootTLDPlusOne, err := publicsuffix.EffectiveTLDPlusOne(root.Hostname())
-	if err != nil {
-		fmt.Sprintln("I couldn't extract the TLD Plus One of #s. This won't be included in the sitemap.", root.Hostname())
+		fmt.Printf("I couldn't extract the TLD Plus One of %s. This won't be included in the sitemap.\n", link.String())
 		return false
 	}
 	return rootTLDPlusOne == linkTLDPlusOne
 }
 
 /*
-CleanURLs will process a pointer to a url.URL, removing anchors and
-query parameters.
+CleanURL will remove anchors and query parameters from the passed link
 */
 func CleanURL(link *url.URL) {
 	link.Fragment = ""
